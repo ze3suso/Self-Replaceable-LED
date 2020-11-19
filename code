@@ -1,0 +1,1471 @@
+
+#include <mega128a.h>
+#include <delay.h>
+#include <stdio.h>
+
+
+unsigned char cnt = 0;     // 인터럽트 발생 횟수  
+unsigned char sec = 0;     // 변수 초
+unsigned char min = 0;      // 변수 분
+unsigned char hour = 0;     // 시 
+
+
+volatile unsigned char signal;                           //수신한 데이터를 저장받을 변수 선언
+
+interrupt [USART1_RXC] void usart0_rx_isr(void)        //수신인터럽트, 발생하면 flag에 수신값 저장
+{
+    signal = UDR1;   
+
+}     
+
+unsigned char str1[];
+void TX0_STR(unsigned char *str)
+{
+    while(!(UCSR1A&(1<<UDRE1)));
+    UDR1='D';
+    while(!(UCSR1A&(1<<UDRE1)));
+    UDR1='O';  
+    while(!(UCSR1A&(1<<UDRE1)));
+    UDR1='N';   
+    while(!(UCSR1A&(1<<UDRE1)));
+    UDR1='E';    
+    while(!(UCSR1A&(1<<UDRE1)));
+    UDR1='\r';    
+    while(!(UCSR1A&(1<<UDRE1)));
+    UDR1='\n';
+}
+
+
+ unsigned  int STEP=0;
+ bit FLAG=0;                          //on버튼 신호 
+ bit mode=0;                          //on버튼, 블루투스, 타이머로 토글 되는 신호 
+ bit done=0;
+
+void cw1(unsigned int cycle1)          //시계방향 모터 회전 포토인터럽터 신호 받으면 정지
+{         
+
+        PORTA = 0b00000000;
+        while(PINC.0==0)
+        {
+            PORTF = 0b00000101;    
+        }
+        while(PINC.0)
+        {
+        PORTF = 0b00000101;  
+        }
+        //delay_ms(cycle1);  
+        PORTF = 0b00000111; 
+        delay_ms(1000);    
+
+}
+
+void cw(unsigned int cycle1)          //시계방향 모터 회전 
+{         
+
+        PORTA = 0b00000000;
+
+        PORTF = 0b00000101;  
+
+        delay_ms(cycle1);  
+        PORTF = 0b00000111; 
+        delay_ms(1000);    
+
+}
+void ccw(unsigned int cycle2)        //반시계방향 모터 회전 
+{         
+
+        PORTA = 0b00000000;   
+
+        PORTF = 0b00000011;  
+
+        delay_ms(cycle2);
+        PORTF = 0b00000111; 
+        delay_ms(1000);    
+
+}       
+
+
+interrupt [TIM0_OVF] void timer_int0(void)              //타이머 인터럽트 
+{                    
+    cnt++;
+    if(cnt == 62) {  // 16.384ms x 31 = 0.999424sec
+       // led = led ^ 0xFF;          
+      //  PORTA = led;              
+        cnt = 0; 
+        sec++;
+        if(sec==60)
+        {
+            min++;
+            sec=0;
+            if(min==60)
+            {
+                hour++;
+                min=0;
+                if(hour==24)
+                {
+                    hour=0;    
+                }
+            }
+        }
+    }
+}
+
+
+void main(void)
+
+{
+
+        TIMSK = 0b00000001;    // TOIE0 = 1;
+    TCCR0 = 0b00000111;    // 일반모드, 프리스케일 = CK/1024
+    TCNT0 = 0b00000000;    // 타이머/카운터0 레지스터 초기값
+
+    SREG = 0b10000000;    // 전역 인터럽트 인에이블 비트 I 셋
+      UCSR1A = 0x00;
+    UCSR1B = 0x98;          //송수신 enable, 수신인터럽트 허용
+    UCSR1C = 0x06;          //비동기식
+    UBRR1H = 0;
+    UBRR1L = 103;           //초당비트수 9600bps
+
+    DDRA =0xFF;               //led
+    PORTA=0x00;
+
+   DDRC =0x00;              //포토인터럽 터
+   PORTC=0x00;                                                                                                                                                                                                      
+
+
+   DDRD = 0x00;                //bluetooth
+   PORTD = 0x00;              //초기값            
+
+   DDRF=0xFF;                  //motor
+   PORTF=0x00;
+
+
+
+  DDRE=0x00;                     //E CDS
+  PORTE=0x00;
+
+
+
+
+while(1)
+ {           
+
+
+            if(STEP==0)
+            {          
+                while(done==0)
+                {
+                    if((PINE&0xC0)==0xC0)        //cds 둘다 됬을 때 넘어감.
+                    {
+                        if(mode)             //on버튼이나 블루투스, 타이머로 mode가 1일때 
+                        {            
+                            cw1(5000);    //시작 지점에서 led1까지의 길이
+                            STEP =1;
+                            break;
+
+                        }
+                        else if(mode==0)
+                        {   
+                            cw1(5000);
+                            STEP=1;    //시작 지점에서 led1까지의 길이
+                            break;
+                        }
+
+                    }   
+                    else if(PINE.6)        // next signal cds
+                    {
+                        if(mode)
+                        {   
+                            cw1(5000);    //시작 지점에서 led1까지의 길이
+                            STEP=1;
+                            break;
+                        }
+                        else if(mode==0)
+                        {     
+                        }
+                    }     
+                    else if(PINE.7)      //  day or night cds
+                    {    
+                        if(mode)
+                        {   
+                            PORTA = 0b00000000;
+                        }
+                        else if(mode==0)
+                        {    
+                            PORTA = 0b00000000;
+                        }
+
+                    }     
+
+
+                     else if(signal=='O')
+                    {
+                        if(FLAG==0)
+                        {
+                            FLAG=1;
+                            mode=~mode;
+                            delay_ms(100);
+                        }   
+                    }   
+                    else if(signal=='R')
+                    {
+                        if(mode)
+                        { 
+                            if(STEP==0)
+                            {       
+                                mode=0;
+                                STEP=0;      
+                                done=1;
+                            }  
+                            else
+                            {
+                                ccw(1000);        //led1에서 시작점까지의 길이
+                                mode=0; 
+                                STEP=0;   
+                                done=1;
+                                break;
+                            }
+                        }
+                        else if(mode==0)  
+                        {  
+                            if(STEP==0)
+                            {       
+                                done=1;
+                            }  
+                            else
+                            {
+                                ccw(1000);         //led1에서 시작점까지의 길이
+                                done=1;        
+                                STEP=0;    
+                                break;
+                            } 
+
+                        }
+
+                    }     
+
+                    else if(signal=='1')
+                    {
+                        if(mode)
+                        { 
+                            if(STEP==1)
+                            {       
+                                STEP=1;
+                            }  
+                            else
+                            {
+                                cw1(5000);  
+
+                                STEP=1;      
+                                break;
+                            }
+                        }
+                        else if(mode==0)
+                        {  
+                            if(STEP==1)
+                            {       
+                                mode=1;
+                                STEP=1;
+                            }  
+                            else
+                            {
+                                cw1(5000);  
+                                mode=1;
+                                STEP=1;  
+                                break;
+                            } 
+                          }
+
+                    }    //end PINC.2
+                    else if(signal=='2')
+                    {
+                        if(mode)
+                        { 
+                            if(STEP==2)
+                            {                          
+                                STEP=2;
+                            }  
+                            else
+                            {
+                                cw1(5300);         //시작점에서 led2까지의 길이
+                                cw(300);         
+                                STEP=2;   
+                                break;
+                            }
+                        }
+                        else if(mode==0)  
+                        {  
+                            if(STEP==2)
+                            {       
+                                mode=1;
+                                STEP=2;
+                            }  
+                            else
+                            {
+                                cw1(5300);       //시작점에서 led2까지의 길이  
+                                cw(300);
+                                mode=1;
+                                STEP=2;  
+                                break;
+                            } 
+                         }
+                    }      
+                    else if(signal=='3')
+                    {
+                       if(mode)
+                        { 
+                            if(STEP==3)
+                            {       
+                                STEP=3;
+                            }  
+                            else
+                            {
+                                cw1(5600);        //시작점에서 led3까지의 길이 
+                                cw(600);
+
+                                STEP=3;  
+                                break;
+                            }
+                        }
+                        else if(mode==0)
+                        {  
+                            if(STEP==3)
+                            {       
+                                mode=1;
+                                STEP=3;
+                            }  
+                            else
+                            {
+                                cw1(5600);         //시작점에서 led3까지의 길이   
+                                cw(600);
+                                mode=1;
+                                STEP=3;   
+                                break;
+                            } 
+
+                         }
+                    }    
+                    else if(signal=='4')
+                    {
+                       if(mode)
+                        { 
+                            if(STEP==4)
+                            {       
+                                STEP=4;
+                            }  
+                            else
+                            {
+                                cw1(5900);     //시작점에서 led4까지의 길이  
+                                cw(900);
+                                STEP=4;  
+                                break;
+                            }
+                        }
+                        else if(mode==0)
+                        {  
+                            if(STEP==4)
+                            {       
+                                mode=1;
+                                STEP=4;
+                            }  
+                            else
+                            {
+                                cw1(5900);       //시작점에서 led3까지의 길이  
+                                cw(900);
+                                mode=1;
+                                STEP=4; 
+                                break;
+                            } 
+                        }
+                    }   
+
+
+
+
+                    else 
+                    {
+                        if(FLAG)
+                        {
+                            FLAG=0;                
+                            delay_ms(100);
+                        }   
+
+                        if(hour==19)
+                        {
+                            mode=1;
+                        }   
+                        if(hour==6)
+                        {
+                            mode=0;
+                        } 
+
+                        if(mode)
+                        {
+                            PORTA = 0b00000000;
+                        }   
+                        if(mode==0)
+                        {
+                            PORTA = 0b00000000;
+                        }
+                    }        
+
+
+                }    
+                while(done)
+                {
+                    if (signal == 'S')
+                    {
+                       done=0;
+                       break; 
+                    }    
+                    else if(PINC.0)
+                    {
+
+                            done=0;
+                            delay_ms(100);
+                            break;
+
+                    } 
+                    else
+                    {
+                        PORTA=0b0;
+                    }
+                }     
+            }                  
+
+
+
+            if(STEP==1)                   
+            { 
+                while(1)
+                {
+
+                    if((PINE&0xC0)==0xC0)
+                    {
+                        if(mode)
+                        {            
+                            cw(300);    //led1에서 led2까지의 길이
+                            STEP =2;
+                            break;
+
+                        }
+                        else if(mode==0)
+                        {   
+                            cw(300);//led1에서 led2까지의 길이
+                            STEP=2;
+                            break;
+                        }
+
+                    }   
+                    else if(PINE.6)        // next signal cds
+                    {
+                        if(mode)
+                        {   
+                            cw(300);//led1에서 led2까지의 길이
+                            STEP=2;
+                            break;
+                        }
+                        else if(mode==0)
+                        {     
+                        }
+                    }     
+                    else if(PINE.7)      //  day or night cds
+                    {    
+                        if(mode)
+                        {   
+                            PORTA = 0b00000100;
+                        }
+                        else if(mode==0)
+                        {    
+                            PORTA = 0b00000100;
+                        }
+
+                    }     
+
+
+                      else if(signal=='O')
+                    {
+                        if(FLAG==0)
+                        {
+                            FLAG=1;
+                            mode=~mode;
+                            delay_ms(100);
+                        }   
+                    }   
+                    else if(signal=='R')
+                    {
+                        if(mode)
+                        { 
+                            if(STEP==0)
+                            {       
+                                mode=0;
+                                STEP=0; 
+                                done=1;
+                            }  
+                            else
+                            {
+                                ccw(5000);      //led1에서 시작점까지의 길이
+                                mode=0; 
+                                STEP=0;   
+                                done=1;
+                                break;
+                            }
+                        }
+                        else if(mode==0)  
+                        {  
+                            if(STEP==0)
+                            {       
+
+                            }  
+                            else
+                            {
+                                ccw(5000);       //led1에서 시작점까지의 길이
+                                done=1;        
+                                STEP=0;    
+                                break;
+                            } 
+
+                        }
+
+                    }    
+
+                    else if(signal=='1')
+                    {
+                        if(mode)
+                        { 
+                            if(STEP==1)
+                            {       
+                                STEP=1;
+                            }  
+                            else
+                            {
+                                cw(1000);  
+
+                                STEP=1;      
+                                break;
+                            }
+                        }
+                        else if(mode==0)
+                        {  
+                            if(STEP==1)
+                            {       
+                                mode=1;
+                                STEP=1;
+                            }  
+                            else
+                            {
+                                cw(1000);  
+                                mode=1;
+                                STEP=1;  
+                                break;
+                            } 
+                          }
+
+                    }    
+                    else if(signal=='2')
+                    {
+                        if(mode)
+                        { 
+                            if(STEP==2)
+                            {                          
+                                STEP=2;
+                            }  
+                            else
+                            {
+                                cw(300);       //led1에서 led2까지의 길이
+
+                                STEP=2;   
+                                break;
+                            }
+                        }
+                        else if(mode==0)  
+                        {  
+                            if(STEP==2)
+                            {       
+                                mode=1;
+                                STEP=2;
+                            }  
+                            else
+                            {
+                                cw(300);         //led1에서 led2까지의 길이
+                                mode=1;
+                                STEP=2;  
+                                break;
+                            } 
+                         }
+                    }      
+                    else if(signal=='3')
+                    {
+                       if(mode)
+                        { 
+                            if(STEP==3)
+                            {       
+                                STEP=3;
+                            }  
+                            else
+                            {
+                                cw(600);          //led1에서 led3까지의 길이
+
+                                STEP=3;  
+                                break;
+                            }
+                        }
+                        else if(mode==0)
+                        {  
+                            if(STEP==3)
+                            {       
+                                mode=1;
+                                STEP=3;
+                            }  
+                            else
+                            {
+                                cw(600);           //led1에서 led3까지의 길이
+                                mode=1;
+                                STEP=3;   
+                                break;
+                            } 
+
+                         }
+                    }    
+                    else if(signal=='4')
+                    {
+                       if(mode)
+                        { 
+                            if(STEP==4)
+                            {       
+                                STEP=4;
+                            }  
+                            else
+                            {
+                                cw(900);       //led1에서 led4까지의 길이
+                                STEP=4;  
+                                break;
+                            }
+                        }
+                        else if(mode==0)
+                        {  
+                            if(STEP==4)
+                            {       
+                                mode=1;
+                                STEP=4;
+                            }  
+                            else
+                            {
+                                cw(900);        //led1에서 led4까지의 길이
+                                mode=1;
+                                STEP=4; 
+                                break;
+                            } 
+                        }
+                    }    
+
+
+                    else 
+                    {
+                        if(FLAG)
+                        {
+                            FLAG=0;                  
+                            delay_ms(100);
+                        }    
+                        if(hour==6)
+                        {
+                            mode=0;
+                        } 
+                        if(hour==17)
+                        {
+                            mode=1;
+                        } 
+
+                        if(mode)
+                        {
+                            PORTA = 0b00000100;
+                        }   
+                        if(mode==0)
+                        {
+                            PORTA = 0b00000000;
+                        }
+                    }
+
+
+                }
+
+            }
+
+
+            if(STEP==2)                  
+            {      
+                while(1)
+                {   
+                    if((PINE&0xC0)==0xC0)
+                    {
+                        if(mode)
+                        {            
+                            cw(300);     //led2에서 led3까지의 길이
+                            STEP =3;
+                            break;
+
+                        }
+                        else if(mode==0)
+                        {   
+                            cw(300);    //led2에서 led3까지의 길이
+                            STEP=3;
+                            break;
+                        }
+
+                    }   
+                    else if(PINE.6)        // next signal cds
+                    {
+                        if(mode)
+                        {   
+                            cw(300);    //led2에서 led3까지의 길이
+                            STEP=3;
+                            break;
+                        }
+                        else if(mode==0)
+                        {     
+                        }
+                    }     
+                    else if(PINE.7)      //  day or night cds
+                    {    
+                        if(mode)
+                        {   
+                            PORTA = 0b00001000;
+                        }
+                        else if(mode==0)
+                        {    
+                            PORTA = 0b00001000;
+                        }
+
+                    }     
+
+
+                      else if(signal=='O')
+                    {
+                        if(FLAG==0)
+                        {
+                            FLAG=1;
+                            mode=~mode;
+                            delay_ms(100);
+                        }   
+                    }   
+                    else if(signal=='R')
+                    {
+                        if(mode)
+                        { 
+                            if(STEP==0)
+                            {       
+                                mode=0;
+                                STEP=0;
+                            }  
+                            else
+                            {
+                                ccw(5300);       //led2에서 시작점까지의 길이
+                                mode=0;  
+                                done=1;
+                                STEP=0;   
+                                break;
+                            }
+                        }
+                        else if(mode==0)  
+                        {  
+                            if(STEP==0)
+                            {       
+
+                            }  
+                            else
+                            {
+                                ccw(5300);        //led2에서 시작점까지의 길이
+                                done=1;        
+                                STEP=0;    
+                                break;
+                            } 
+
+                        }
+
+                    }    
+
+                    else if(signal=='1')
+                    {
+                        if(mode)
+                        { 
+                            if(STEP==1)
+                            {       
+                                STEP=1;
+                            }  
+                            else
+                            {
+                                ccw(300);       //led2에서 led1까지의 길이
+
+                                STEP=1;      
+                                break;
+                            }
+                        }
+                        else if(mode==0)
+                        {  
+                            if(STEP==1)
+                            {       
+                                mode=1;
+                                STEP=1;
+                            }  
+                            else
+                            {
+                                ccw(300);        //led2에서 led1까지의 길이
+                                mode=1;
+                                STEP=1;  
+                                break;
+                            } 
+                          }
+
+                    }  
+                    else if(signal=='2')
+                    {
+                        if(mode)
+                        { 
+                            if(STEP==2)
+                            {                          
+                                STEP=2;
+                            }  
+                            else
+                            {
+                                cw(1000);   
+
+                                STEP=2;   
+                                break;
+                            }
+                        }
+                        else if(mode==0)  
+                        {  
+                            if(STEP==2)
+                            {       
+                                mode=1;
+                                STEP=2;
+                            }  
+                            else
+                            {
+                                cw(1000);   
+                                mode=1;
+                                STEP=2;  
+                                break;
+                            } 
+                         }
+                    }      
+                    else if(signal=='3')
+                    {
+                       if(mode)
+                        { 
+                            if(STEP==3)
+                            {       
+                                STEP=3;
+                            }  
+                            else
+                            {
+                                cw(300);          //led2에서 led3까지의 길이
+
+                                STEP=3;  
+                                break;
+                            }
+                        }
+                        else if(mode==0)  
+                        {  
+                            if(STEP==3)
+                            {       
+                                mode=1;
+                                STEP=3;
+                            }  
+                            else
+                            {
+                                cw(300);            //led2에서 led3까지의 길이
+                                mode=1;
+                                STEP=3;   
+                                break;
+                            } 
+
+                         }
+                    }    
+                    else if(signal=='4')
+                    {
+                       if(mode)
+                        { 
+                            if(STEP==4)
+                            {       
+                                STEP=4;
+                            }  
+                            else
+                            {
+                                cw(600);        //led2에서 led4까지의 길이
+                                STEP=4;  
+                                break;
+                            }
+                        }
+                        else if(mode==0)
+                        {  
+                            if(STEP==4)
+                            {       
+                                mode=1;
+                                STEP=4;
+                            }  
+                            else
+                            {
+                                cw(600);         //led2에서 led4까지의 길이
+                                mode=1;
+                                STEP=4; 
+                                break;
+                            } 
+                        }
+                    }    
+
+
+                    else 
+                    {
+                        if(FLAG)
+                        {
+                            FLAG=0;                  
+                            delay_ms(100);
+                        }
+
+                        if(hour==19)
+                        {
+                            mode=1;
+                        }     
+                        if(hour==6)
+                        {
+                            mode=0;
+                        } 
+
+                        if(mode)
+                        {
+                            PORTA = 0b00001000;
+                        }   
+                        if(mode==0)
+                        {
+                            PORTA = 0b00000000;
+                        }
+                    }
+
+                }
+            }       
+
+            if(STEP==3)                    
+            {          
+                while(1)
+                {
+
+                    if((PINE&0xC0)==0xC0)
+                    {
+                        if(mode)
+                        {            
+                            cw(300);
+                            STEP =4;      //led3에서 led4까지의 길이
+                            break;
+
+                        }
+                        else if(mode==0)
+                        {   
+                            cw(300);
+                            STEP=4;     //led3에서 led4까지의 길이
+                            break;
+                        }
+
+                    }   
+                    else if(PINE.6)        // next signal cds
+                    {
+                        if(mode)
+                        {   
+                            cw(300);     //led3에서 led4까지의 길이
+                            STEP=4;
+                            break;
+                        }
+                        else if(mode==0)
+                        {     
+                        }
+                    }     
+                    else if(PINE.7)      //  day or night cds
+                    {    
+                        if(mode)
+                        {   
+                            PORTA = 0b00010000;
+                        }
+                        else if(mode==0)
+                        {    
+                            PORTA = 0b00010000;
+                        }
+
+                    }     
+
+
+                      else if(signal=='O')
+                    {
+                        if(FLAG==0)
+                        {
+                            FLAG=1;
+                            mode=~mode;
+                            delay_ms(100);
+                        }   
+                    }   
+                    else if(signal=='R')
+                    {
+                        if(mode)
+                        { 
+                            if(STEP==0)
+                            {       
+                                mode=0;
+                                STEP=0;           
+                                done=1;
+                            }  
+                            else
+                            {
+                                ccw(5600);          //led3에서 시작점까지의 길이
+                                mode=0; 
+                                STEP=0;       
+                                done=1;
+                                break;
+                            }
+                        }
+                        else if(mode==0)  
+                        {  
+                            if(STEP==0)
+                            {       
+
+                            }  
+                            else
+                            {
+                                ccw(5600);           //led3에서 시작점까지의 길이
+                                done=1;        
+                                STEP=0;    
+                                break;
+                            } 
+
+                        }
+
+                    }    
+
+                    else if(signal=='1')
+                    {
+                        if(mode)
+                        { 
+                            if(STEP==1)
+                            {       
+                                STEP=1;
+                            }  
+                            else
+                            {
+                                ccw(600);          //led3에서 led1까지의 길이
+
+                                STEP=1;      
+                                break;
+                            }
+                        }
+                        else if(mode==0)
+                        {  
+                            if(STEP==1)
+                            {       
+                                mode=1;
+                                STEP=1;
+                            }  
+                            else
+                            {
+                                ccw(600);           //led3에서 led1까지의 길이
+                                mode=1;
+                                STEP=1;  
+                                break;
+                            } 
+                          }
+
+                    }   
+                    else if(signal=='2')
+                    {
+                        if(mode)
+                        { 
+                            if(STEP==2)
+                            {                          
+                                STEP=2;
+                            }  
+                            else
+                            {
+                                ccw(300);            //led3에서 led2까지의 길이
+
+                                STEP=2;   
+                                break;
+                            }
+                        }
+                        else if(mode==0)  
+                        {  
+                            if(STEP==2)
+                            {       
+                                mode=1;
+                                STEP=2;
+                            }  
+                            else
+                            {
+                                ccw(300);             //led3에서 led2까지의 길이
+                                mode=1;
+                                STEP=2;  
+                                break;
+                            } 
+                         }
+                    }      
+                    else if(signal=='3')
+                    {
+                       if(mode)
+                        { 
+                            if(STEP==3)
+                            {       
+                                STEP=3;
+                            }  
+                            else
+                            {
+                                cw(1000);    
+
+                                STEP=3;  
+                                break;
+                            }
+                        }
+                        else if(mode==0)
+                        {  
+                            if(STEP==3)
+                            {       
+                                mode=1;
+                                STEP=3;
+                            }  
+                            else
+                            {
+                                cw(1000);     
+                                mode=1;
+                                STEP=3;   
+                                break;
+                            } 
+
+                         }
+                    }    
+                    else if(signal=='4')
+                    {
+                       if(mode)
+                        { 
+                            if(STEP==4)
+                            {       
+                                STEP=4;
+                            }  
+                            else
+                            {
+                                cw(300);           //led3에서 led4까지의 길이
+                                STEP=4;  
+                                break;
+                            }
+                        }
+                        else if(mode==0)
+                        {  
+                            if(STEP==4)
+                            {       
+                                mode=1;
+                                STEP=4;
+                            }  
+                            else
+                            {
+                                cw(300);            //led3에서 led4까지의 길이
+                                mode=1;
+                                STEP=4; 
+                                break;
+                            } 
+                        }
+                    }    
+
+
+                    else 
+                    {
+                        if(FLAG)
+                        {
+                            FLAG=0;                  
+                            delay_ms(100);
+                        }
+
+                        if(hour==19)
+                        {
+                            mode=1;
+                        } 
+                        if(hour==6)
+                        {
+                            mode=0;
+                        } 
+
+                        if(mode)
+                        {
+                            PORTA = 0b00010000;
+                        }   
+                        if(mode==0)
+                        {
+                            PORTA = 0b00000000;
+                        }
+                    }
+
+                }
+
+            }      
+
+            if(STEP ==4)                   
+            {         
+                while(1)
+                {
+
+                    if((PINE&0xC0)==0xC0)
+                    {
+                        if(mode)
+                        {            
+                            ccw(5900);         //led4에서 시작점까지의 길이
+                            STEP =0;
+                            TX0_STR(str1);   
+                            done=1; 
+                            break;
+
+                        }
+                        else if(mode==0)
+                        {   
+                            ccw(5900);        //led4에서 시작점까지의 길이
+                            TX0_STR(str1);    
+                            STEP=0; 
+                            done=1; 
+                            break;
+                        }
+
+                    }   
+                    else if(PINE.6)        // next signal cds
+                    {
+                        if(mode)
+                        {   
+                            ccw(5900);         //led4에서 시작점까지의 길이
+                            TX0_STR(str1);    
+                            STEP=0; 
+                            done=1; 
+                            break;
+                        }
+                        else if(mode==0)
+                        {     
+                        }
+                    }     
+                    else if(PINE.7)      //  day or night cds
+                    {    
+                        if(mode)
+                        {   
+                            PORTA = 0b00100000;
+                        }
+                        else if(mode==0)
+                        {    
+                            PORTA = 0b00100000;
+                        }
+
+                    }     
+
+
+                      else if(signal=='O')
+                    {
+                        if(FLAG==0)
+                        {
+                            FLAG=1;
+                            mode=~mode;
+                            delay_ms(100);
+                        }   
+                    }   
+                    else if(signal=='R')
+                    {
+                        if(mode)
+                        { 
+                            if(STEP==0)
+                            {       
+                                mode=0;
+                                STEP=0;   
+                                done=1;
+                            }  
+                            else
+                            {
+                                ccw(5900);         //led4에서 시작점까지의 길이
+                                mode=0; 
+                                STEP=0; 
+                                done=1;  
+                                break;
+                            }
+                        }
+                        else if(mode==0)  
+                        {  
+                            if(STEP==0)
+                            {       
+
+                            }  
+                            else
+                            {
+                                ccw(5900);          //led4에서 시작점까지의 길이
+
+                                STEP=0; 
+                                done=1;   
+                                break;
+                            } 
+
+                        }
+
+                    }  
+
+                    else if(signal=='1')
+                    {
+                        if(mode)
+                        { 
+                            if(STEP==1)
+                            {       
+                                STEP=1;
+                            }  
+                            else
+                            {
+                                ccw(900);         //led4에서 led1까지의 길이
+
+                                STEP=1;      
+                                break;
+                            }
+                        }
+                        else if(mode==0)
+                        {  
+                            if(STEP==1)
+                            {       
+                                mode=1;
+                                STEP=1;
+                            }  
+                            else
+                            {
+                                cw(900);          //led4에서 led1까지의 길이
+                                mode=1;
+                                STEP=1;  
+                                break;
+                            } 
+                          }
+
+                    }    
+                    else if(signal=='2')
+                    {
+                        if(mode)
+                        { 
+                            if(STEP==2)
+                            {                          
+                                STEP=2;
+                            }  
+                            else
+                            {
+                                ccw(600);           //led4에서 led2까지의 길이
+
+                                STEP=2;   
+                                break;
+                            }
+                        }
+                        else if(mode==0)  
+                        {  
+                            if(STEP==2)
+                            {       
+                                mode=1;
+                                STEP=2;
+                            }  
+                            else
+                            {
+                                ccw(600);           //led4에서 led2까지의 길이
+                                mode=1;
+                                STEP=2;  
+                                break;
+                            } 
+                         }
+                    }      
+                    else if(signal=='3')
+                    {
+                       if(mode)
+                        { 
+                            if(STEP==3)
+                            {       
+                                STEP=3;
+                            }  
+                            else
+                            {
+                                ccw(300);            //led4에서 led3까지의 길이
+
+                                STEP=3;  
+                                break;
+                            }
+                        }
+                        else if(mode==0)
+                        {  
+                            if(STEP==3)
+                            {       
+                                mode=1;
+                                STEP=3;
+                            }  
+                            else
+                            {
+                                ccw(300);            //led4에서 led3까지의 길이
+                                mode=1;
+                                STEP=3;   
+                                break;
+                            } 
+
+                         }
+                    }    
+                    else if(signal=='4')
+                    {
+                       if(mode)
+                        { 
+                            if(STEP==4)
+                            {       
+                                STEP=4;
+                            }  
+                            else
+                            {
+                                cw(1000); 
+                                STEP=4;  
+                                break;
+                            }
+                        }
+                        else if(mode==0)
+                        {  
+                            if(STEP==4)
+                            {       
+                                mode=1;
+                                STEP=4;
+                            }  
+                            else
+                            {
+                                cw(1000);   
+                                mode=1;
+                                STEP=4; 
+                                break;
+                            } 
+                        }
+                    }    
+
+
+                    else 
+                    {
+                        if(FLAG)
+                        {
+                            FLAG=0;                  
+                            delay_ms(100);
+                        }
+
+                        if(hour==19)
+                        {
+                            mode=1;
+                        }    
+                        if(hour==6)
+                        {
+                            mode=0;
+                        } 
+
+                        if(mode)
+                        {
+                            PORTA = 0b00100000;
+                        }   
+                        if(mode==0)
+                        {
+                            PORTA = 0b00000000;
+                        }
+                    }
+
+                }
+
+
+            }     
+
+
+
+    }//endwhile
+}//end main     
